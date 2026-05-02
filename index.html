@@ -3,155 +3,439 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Split Debt</title>
+  <title>Split Debt — раздели расходы по-честному</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
+    [x-cloak] { display: none !important; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .app-card {
+      border: 0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 3px rgba(15, 23, 42, .06);
+    }
+    .app-card .card-header {
+      background: transparent;
+      border-bottom: 1px solid rgba(15, 23, 42, .06);
+      padding: .85rem 1rem;
+    }
+
+    .result-card {
+      border: 1px solid rgba(13, 110, 253, .18);
+      background: linear-gradient(180deg, #eef4ff 0%, #ffffff 60%);
+      box-shadow: 0 4px 16px rgba(20, 80, 200, .08);
+    }
+    .result-card .card-header {
+      background: transparent;
+      border-bottom: 1px solid rgba(20, 80, 200, .12);
+      padding: .85rem 1rem;
+    }
+
+    .summary-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .35rem 1.25rem;
+      padding: .75rem 1rem;
+      background: rgba(13, 110, 253, .06);
+      border-radius: .5rem;
+      margin-bottom: 1rem;
+      font-size: .9rem;
+    }
+    .summary-strip .label { color: #6c757d; margin-right: .35rem; }
+    .summary-strip .value { font-weight: 600; color: #212529; }
+
+    .balance-row,
+    .tx-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .55rem .25rem;
+      border-bottom: 1px solid rgba(15, 23, 42, .05);
+    }
+    .balance-row:last-child,
+    .tx-row:last-child { border-bottom: 0; }
+
+    .balance-name { font-weight: 500; }
+    .balance-status {
+      font-size: .8rem;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .balance-amount {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+    }
+    .balance-amount.is-debtor { color: #b02a37; }
+    .balance-amount.is-creditor { color: #0a7c47; }
+    .balance-amount.is-zero { color: #6c757d; }
+
+    .tx-arrow { color: #6c757d; margin: 0 .35rem; }
+    .tx-amount {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 700;
+    }
+
+    .row-action-btn {
+      width: 2rem; height: 2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: transparent;
+      color: #6c757d;
+      border-radius: .35rem;
+      font-size: 1.1rem;
+      line-height: 1;
+    }
+    .row-action-btn:hover { background: rgba(176, 42, 55, .08); color: #b02a37; }
+
     .consumer-checks .form-check-inline { margin-right: .75rem; }
+
+    .list-group-item.has-issue {
+      box-shadow: inset 3px 0 0 #f0a500;
+    }
+    .row-issue {
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .8rem;
+      color: #8a5b00;
+      background: rgba(240, 165, 0, .1);
+      padding: .25rem .5rem;
+      border-radius: .35rem;
+      margin-top: .35rem;
+    }
+    .row-issue::before {
+      content: "⚠";
+      font-size: .75rem;
+    }
+    .summary-warn {
+      color: #8a5b00 !important;
+      background: rgba(240, 165, 0, .12);
+      padding: .15rem .55rem;
+      border-radius: .25rem;
+    }
+
+    .undo-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 1.25rem;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: .85rem;
+      max-width: calc(100vw - 2rem);
+      background: #212529;
+      color: #fff;
+      padding: .55rem .7rem .55rem 1rem;
+      border-radius: .6rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+      z-index: 1080;
+      font-size: .9rem;
+    }
+    .undo-toast button { line-height: 1; }
+    .undo-toast .undo-link {
+      background: none;
+      border: 0;
+      color: #79b8ff;
+      font-weight: 600;
+      padding: .25rem .35rem;
+      cursor: pointer;
+    }
+    .undo-toast .undo-link:hover { color: #a8cdff; }
+    .undo-toast .undo-close {
+      background: none;
+      border: 0;
+      color: #adb5bd;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: .35rem;
+      cursor: pointer;
+      font-size: 1.1rem;
+    }
+    .undo-toast .undo-close:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+
     @media (max-width: 575.98px) {
       h1.h3 { font-size: 1.25rem; }
     }
   </style>
 </head>
 <body class="bg-light">
-  <div class="container py-3 py-md-4" x-data="splitDebt()" x-init="init()" x-cloak>
+  <div class="container py-3 py-md-4" x-data="splitDebt()" x-init="init()" x-cloak style="max-width: 720px;">
 
     <header class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
-      <h1 class="h3 m-0">Split&nbsp;Debt</h1>
-      <div class="btn-group">
-        <button class="btn btn-outline-secondary btn-sm" @click="resetCalc()" :disabled="!calc.persons.length && !calc.spends.length">
+      <div>
+        <h1 class="h3 m-0 fw-semibold">Split Debt</h1>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary btn-sm"
+                @click="resetCalc()"
+                :disabled="!calc.persons.length && !calc.spends.length">
           Очистить
         </button>
-        <button class="btn btn-primary btn-sm" @click="copyShareLink()">
+        <button class="btn btn-primary btn-sm"
+                @click="copyShareLink()"
+                :disabled="!calc.persons.length && !calc.spends.length">
           <span x-text="shareCopied ? 'Скопировано ✓' : 'Поделиться'"></span>
         </button>
       </div>
     </header>
 
-    <section class="card mb-3">
+    <!-- Empty state / onboarding -->
+    <section class="app-card card mb-3"
+             x-show="!calc.persons.length && !calc.spends.length">
+      <div class="card-body text-center py-4">
+        <p class="text-muted mb-3 mx-auto" style="max-width: 36rem;">
+          Добавь людей, запиши кто за что платил — посчитаю минимальный набор переводов,
+          чтобы все вышли в ноль. Расчёт хранится прямо в ссылке: можно поделиться или
+          открыть на другом устройстве.
+        </p>
+        <div class="d-flex gap-2 justify-content-center flex-wrap">
+          <button class="btn btn-primary btn-sm" @click="addAdHocPerson()">
+            + Первый участник
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" @click="loadExample()">
+            Показать пример
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Persons -->
+    <section class="app-card card mb-3"
+             x-show="calc.persons.length || calc.spends.length">
       <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
-        <span class="fw-medium">Участники</span>
+        <span class="fw-medium">
+          Участники
+          <span class="text-muted small" x-show="calc.persons.length"
+                x-text="`· ${calc.persons.length}`"></span>
+        </span>
         <button class="btn btn-outline-primary btn-sm" @click="addAdHocPerson()">
-          Добавить
+          + Добавить
         </button>
       </div>
 
       <ul class="list-group list-group-flush" x-show="calc.persons.length">
         <template x-for="(p, i) in calc.persons" :key="p.id">
-          <li class="list-group-item">
-            <div class="row g-2 align-items-center">
+          <li class="list-group-item" :class="{ 'has-issue': personIssue(p) }">
+            <div class="row g-2 align-items-start">
               <div class="col-12 col-md-5">
                 <input class="form-control form-control-sm" placeholder="Имя" x-model="p.name">
               </div>
               <div class="col-9 col-md-6">
-                <select class="form-select form-select-sm" x-model="p.groupId" @change="onPersonGroupChange(p)">
-                  <option value="">— без кошелька —</option>
+                <select class="form-select form-select-sm"
+                        x-model="p.groupId"
+                        @change="onPersonGroupChange(p)">
+                  <option value="" :selected="!p.groupId">— без общего кошелька —</option>
                   <template x-for="g in calc.groups" :key="g.id">
-                    <option :value="g.id" x-text="g.name || '(кошелёк)'"></option>
+                    <option :value="g.id"
+                            :selected="g.id === p.groupId"
+                            x-text="g.name || '(без названия)'"></option>
                   </template>
-                  <option value="__new__">+ Новый кошелёк…</option>
+                  <option value="__new__">+ Новый общий кошелёк…</option>
                 </select>
+                <input x-show="p.groupId && walletFor(p)"
+                       class="form-control form-control-sm mt-1"
+                       placeholder="Название кошелька (например: семья)"
+                       :value="walletFor(p)?.name || ''"
+                       @input="setWalletName(p, $event.target.value)">
               </div>
               <div class="col-3 col-md-1 text-end">
-                <button class="btn btn-sm btn-outline-danger" @click="removeParticipant(i)" title="Удалить">×</button>
+                <button class="row-action-btn"
+                        @click="removeParticipant(i)"
+                        title="Удалить участника"
+                        aria-label="Удалить">×</button>
               </div>
-            </div>
-          </li>
-        </template>
-      </ul>
-
-      <div class="card-body py-3" x-show="!calc.persons.length">
-        <p class="text-muted m-0 small">Добавь участников расчёта.</p>
-      </div>
-    </section>
-
-    <section class="card mb-3">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <span class="fw-medium">Траты</span>
-        <button class="btn btn-sm btn-outline-primary" @click="addSpend()" :disabled="calc.persons.length < 2">
-          Добавить
-        </button>
-      </div>
-
-      <ul class="list-group list-group-flush" x-show="calc.spends.length">
-        <template x-for="(s, i) in calc.spends" :key="s.id">
-          <li class="list-group-item">
-            <div class="row g-2 align-items-center mb-2">
-              <div class="col-7 col-md-3">
-                <input type="number" inputmode="decimal" step="0.01" min="0"
-                       class="form-control form-control-sm" placeholder="Сумма" x-model="s.value">
-              </div>
-              <div class="col-12 col-md-4 order-md-0 order-1">
-                <select class="form-select form-select-sm" x-model="s.sponsorId">
-                  <option value="">— кто заплатил —</option>
-                  <template x-for="p in calc.persons" :key="p.id">
-                    <option :value="p.id" x-text="p.name || '—'"></option>
-                  </template>
-                </select>
-              </div>
-              <div class="col-12 col-md-4 order-md-0 order-2 d-flex align-items-center">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" :id="'all-' + s.id"
-                         :checked="s.consumerIds === '__all__'" @change="toggleAllConsumers(s)">
-                  <label class="form-check-label small" :for="'all-' + s.id">На всех</label>
-                </div>
-              </div>
-              <div class="col-5 col-md-1 text-end order-md-0 order-0">
-                <button class="btn btn-sm btn-outline-danger" @click="removeSpend(i)" title="Удалить">×</button>
-              </div>
-            </div>
-            <div x-show="s.consumerIds !== '__all__'" class="consumer-checks pt-1">
-              <small class="text-muted d-block mb-1">Кто пользовался:</small>
-              <template x-for="p in calc.persons" :key="p.id">
-                <div class="form-check form-check-inline">
-                  <input class="form-check-input" type="checkbox" :id="`c-${s.id}-${p.id}`"
-                         :checked="Array.isArray(s.consumerIds) && s.consumerIds.includes(p.id)"
-                         @change="toggleConsumer(s, p.id)">
-                  <label class="form-check-label small" :for="`c-${s.id}-${p.id}`" x-text="p.name || '—'"></label>
+              <template x-if="personIssue(p)">
+                <div class="col-12">
+                  <span class="row-issue" x-text="personIssue(p)"></span>
                 </div>
               </template>
             </div>
           </li>
         </template>
       </ul>
+    </section>
+
+    <!-- Spends -->
+    <section class="app-card card mb-3"
+             x-show="calc.persons.length || calc.spends.length">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span class="fw-medium">
+          Траты
+          <span class="text-muted small" x-show="calc.spends.length"
+                x-text="`· ${calc.spends.length}`"></span>
+        </span>
+        <button class="btn btn-sm btn-outline-primary"
+                @click="addSpend()"
+                :disabled="calc.persons.length < 2">
+          + Добавить
+        </button>
+      </div>
+
+      <ul class="list-group list-group-flush" x-show="calc.spends.length">
+        <template x-for="(s, i) in calc.spends" :key="s.id">
+          <li class="list-group-item" :class="{ 'has-issue': spendIssue(s) }">
+            <div class="row g-2 align-items-center mb-2">
+              <div class="col-12 col-md-5">
+                <input class="form-control form-control-sm"
+                       placeholder="Что за трата (например: ужин, такси)"
+                       x-model="s.note">
+              </div>
+              <div class="col-7 col-md-3">
+                <input type="number" inputmode="decimal" step="0.01" min="0"
+                       class="form-control form-control-sm"
+                       placeholder="Сумма" x-model="s.value">
+              </div>
+              <div class="col-12 col-md-3 order-md-0 order-2">
+                <select class="form-select form-select-sm" x-model="s.sponsorId">
+                  <option value="" :selected="!s.sponsorId">— кто заплатил —</option>
+                  <template x-for="p in calc.persons" :key="p.id">
+                    <option :value="p.id"
+                            :selected="p.id === s.sponsorId"
+                            x-text="p.name || '— без имени —'"></option>
+                  </template>
+                </select>
+              </div>
+              <div class="col-5 col-md-1 text-end">
+                <button class="row-action-btn"
+                        @click="removeSpend(i)"
+                        title="Удалить трату"
+                        aria-label="Удалить">×</button>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
+              <div class="form-check m-0">
+                <input class="form-check-input" type="checkbox" :id="'all-' + s.id"
+                       :checked="s.consumerIds === '__all__'"
+                       @change="toggleAllConsumers(s)">
+                <label class="form-check-label small" :for="'all-' + s.id">На всех</label>
+              </div>
+              <small class="text-muted" x-show="s.consumerIds !== '__all__'">
+                Кто пользовался:
+              </small>
+            </div>
+            <div x-show="s.consumerIds !== '__all__'" class="consumer-checks pt-2">
+              <template x-for="p in calc.persons" :key="p.id">
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="checkbox" :id="`c-${s.id}-${p.id}`"
+                         :checked="Array.isArray(s.consumerIds) && s.consumerIds.includes(p.id)"
+                         @change="toggleConsumer(s, p.id)">
+                  <label class="form-check-label small" :for="`c-${s.id}-${p.id}`"
+                         x-text="p.name || '— без имени —'"></label>
+                </div>
+              </template>
+            </div>
+            <template x-if="spendIssue(s)">
+              <div class="mt-2">
+                <span class="row-issue">
+                  Не учтено: <span x-text="spendIssue(s)"></span>
+                </span>
+              </div>
+            </template>
+          </li>
+        </template>
+      </ul>
 
       <div class="card-body py-3" x-show="!calc.spends.length">
-        <p class="text-muted m-0 small" x-text="calc.persons.length < 2 ? 'Сначала добавь хотя бы двух участников.' : 'Добавь траты.'"></p>
+        <p class="text-muted m-0 small"
+           x-text="calc.persons.length < 2 ? 'Добавь хотя бы двух участников, чтобы начать делить траты.' : 'Добавь первую трату.'"></p>
       </div>
     </section>
 
-    <section class="card mb-3" x-show="result">
-      <div class="card-header fw-medium">Результат</div>
+    <!-- Result -->
+    <section class="result-card card mb-3" x-show="result">
+      <div class="card-header fw-semibold">Итог</div>
       <div class="card-body">
-        <h2 class="h6">Балансы по кошелькам</h2>
-        <ul class="list-group list-group-flush mb-3">
+
+        <div class="summary-strip" x-show="result?.summary">
+          <span><span class="label">всего:</span><span class="value" x-text="result?.summary?.totalDisplay"></span></span>
+          <span><span class="label">трат:</span><span class="value" x-text="result?.summary?.spendCount"></span></span>
+          <span><span class="label">участников:</span><span class="value" x-text="result?.summary?.personCount"></span></span>
+          <span><span class="label">в среднем:</span><span class="value" x-text="result?.summary?.avgDisplay"></span></span>
+          <span class="summary-warn" x-show="result?.summary?.skippedSpends > 0">
+            пропущено трат: <span x-text="result?.summary?.skippedSpends"></span>
+          </span>
+          <span class="summary-warn" x-show="result?.summary?.skippedPersons > 0">
+            без имени: <span x-text="result?.summary?.skippedPersons"></span>
+          </span>
+        </div>
+
+        <h2 class="h6 mb-2">Балансы</h2>
+        <div class="mb-3">
           <template x-for="b in result?.balances || []" :key="b.wallet">
-            <li class="list-group-item d-flex justify-content-between align-items-center px-0"
-                :class="{
-                  'text-success': b.sign < 0,
-                  'text-danger': b.sign > 0,
-                  'text-muted': b.sign === 0
-                }">
-              <span x-text="b.name"></span>
-              <span class="font-monospace" x-text="b.display"></span>
-            </li>
+            <div class="balance-row">
+              <div>
+                <div class="balance-name" x-text="b.name"></div>
+                <div class="balance-status">
+                  <span x-show="b.sign > 0">должен</span>
+                  <span x-show="b.sign < 0">получит</span>
+                  <span x-show="b.sign === 0">в нуле</span>
+                </div>
+              </div>
+              <div class="balance-amount"
+                   :class="{
+                     'is-debtor': b.sign > 0,
+                     'is-creditor': b.sign < 0,
+                     'is-zero': b.sign === 0
+                   }"
+                   x-text="b.display"></div>
+            </div>
           </template>
-        </ul>
-        <h2 class="h6">Транзакции</h2>
-        <ul class="list-group list-group-flush" x-show="result?.transactions?.length">
+        </div>
+
+        <h2 class="h6 mb-2">Кто кому переводит</h2>
+        <div class="mb-3" x-show="result?.transactions?.length">
           <template x-for="(t, i) in result?.transactions || []" :key="i">
-            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <div class="tx-row">
               <span>
                 <span x-text="t.fromName"></span>
-                <span class="mx-2 text-muted">→</span>
+                <span class="tx-arrow">→</span>
                 <span x-text="t.toName"></span>
               </span>
-              <span class="fw-bold font-monospace" x-text="t.display"></span>
-            </li>
+              <span class="tx-amount" x-text="t.display"></span>
+            </div>
           </template>
-        </ul>
-        <p class="text-muted small m-0" x-show="!result?.transactions?.length">Все балансы нулевые.</p>
+        </div>
+        <p class="text-muted small mb-3" x-show="!result?.transactions?.length">
+          Все балансы сходятся, переводов не нужно.
+        </p>
+
+        <details x-show="result?.spendsList?.length">
+          <summary class="text-muted small">Что учтено в расчёте</summary>
+          <ul class="list-unstyled small mt-2 mb-0">
+            <template x-for="s in result?.spendsList || []" :key="s.id">
+              <li class="d-flex justify-content-between gap-2 py-1 border-bottom">
+                <span class="text-truncate">
+                  <span x-text="s.note || '(без названия)'"></span>
+                  <span class="text-muted"> · </span>
+                  <span class="text-muted">заплатил <span x-text="s.sponsorName"></span></span>
+                  <span class="text-muted" x-show="s.forAll"> · на всех</span>
+                  <span class="text-muted" x-show="!s.forAll">
+                    · на <span x-text="(s.consumerNames || []).join(', ')"></span>
+                  </span>
+                </span>
+                <span class="text-nowrap fw-medium" x-text="s.display"></span>
+              </li>
+            </template>
+          </ul>
+        </details>
+
       </div>
     </section>
+
+    <div class="undo-toast"
+         x-show="lastClearedSnapshot"
+         x-transition.opacity.duration.150ms
+         role="status"
+         aria-live="polite">
+      <span>Расчёт очищен</span>
+      <button type="button" class="undo-link" @click="undoClear()">Отменить</button>
+      <button type="button" class="undo-close" @click="dismissClearedToast()" aria-label="Закрыть">×</button>
+    </div>
 
   </div>
 
@@ -160,7 +444,5 @@
   <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
   <script src="app.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.10/dist/cdn.min.js"></script>
-
-  <style>[x-cloak] { display: none !important; }</style>
 </body>
 </html>

@@ -44,12 +44,26 @@ test('encode/decode round trip preserves all fields', () => {
     ],
     groups: [{ id: 'g1', name: 'Family' }],
     spends: [
-      { id: 's1', value: '100', sponsorId: 'p1', consumerIds: '__all__' },
-      { id: 's2', value: '50', sponsorId: 'p2', consumerIds: ['p1'] },
+      { id: 's1', value: '100', sponsorId: 'p1', consumerIds: '__all__', note: 'ужин' },
+      { id: 's2', value: '50', sponsorId: 'p2', consumerIds: ['p1'], note: '' },
     ],
   };
   const decoded = decodeCalc(encodeCalc(calc));
   assert.deepEqual(decoded, calc);
+});
+
+test('decodeCalc fills missing note as empty string (backward compat)', () => {
+  const { decodeCalc } = loadApp();
+  // hand-crafted v1 payload without `t` key (pre-note schema)
+  const payload = {
+    v: 1,
+    p: [{ i: 'A', n: 'A', g: null }],
+    g: [],
+    s: [{ i: 's1', v: '10', sp: 'A', c: '*' }],
+  };
+  const encoded = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
+  const decoded = decodeCalc(encoded);
+  assert.equal(decoded.spends[0].note, '');
 });
 
 test('decodeCalc returns null on garbage input', () => {
@@ -292,6 +306,277 @@ test('addSpend appends a default __all__ spend', () => {
   assert.equal(inst.calc.spends.length, 1);
   assert.equal(inst.calc.spends[0].consumerIds, '__all__');
   assert.equal(inst.calc.spends[0].sponsorId, '');
+  assert.equal(inst.calc.spends[0].note, '');
+});
+
+test('onPersonGroupChange creates an empty-named wallet (no prompt)', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons = [{ id: 'A', name: 'A', groupId: '__new__' }];
+  inst.onPersonGroupChange(inst.calc.persons[0]);
+  assert.equal(inst.calc.groups.length, 1);
+  assert.equal(inst.calc.groups[0].name, '');
+  assert.equal(inst.calc.persons[0].groupId, inst.calc.groups[0].id);
+});
+
+test('walletFor returns the wallet object or null', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  const g = { id: 'g1', name: 'Family' };
+  inst.calc.groups = [g];
+  inst.calc.persons = [
+    { id: 'A', name: 'A', groupId: 'g1' },
+    { id: 'B', name: 'B', groupId: '' },
+  ];
+  assert.equal(inst.walletFor(inst.calc.persons[0]), g);
+  assert.equal(inst.walletFor(inst.calc.persons[1]), null);
+});
+
+test('setWalletName updates the wallet referenced by person', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  const g = { id: 'g1', name: '' };
+  inst.calc.groups = [g];
+  inst.calc.persons = [{ id: 'A', name: 'A', groupId: 'g1' }];
+  inst.setWalletName(inst.calc.persons[0], 'Семья');
+  assert.equal(g.name, 'Семья');
+});
+
+test('loadExample builds calc through the regular flow with no issues', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.loadExample();
+  assert.equal(inst.calc.persons.length, 3);
+  assert.equal(inst.calc.spends.length, 3);
+  for (const p of inst.calc.persons) {
+    assert.equal(inst.personIssue(p), null, `person ${p.name} should be valid`);
+  }
+  for (const s of inst.calc.spends) {
+    assert.equal(inst.spendIssue(s), null, `spend ${s.note} should be valid`);
+  }
+  inst.recompute();
+  assert.notEqual(inst.result, null);
+  assert.ok(inst.result.transactions.length > 0);
+  assert.equal(inst.result.summary.skippedSpends, 0);
+  assert.equal(inst.result.summary.skippedPersons, 0);
+});
+
+test('loadExample over an existing calc clears persons/spends/groups in place (no reassignment)', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+
+  // pre-populate with junk + a wallet
+  inst.addAdHocPerson();
+  inst.calc.persons[0].name = 'Old';
+  inst.calc.persons[0].groupId = '__new__';
+  inst.onPersonGroupChange(inst.calc.persons[0]);
+  inst.addSpend();
+
+  const calcRef = inst.calc;
+  const personsRef = inst.calc.persons;
+  const spendsRef = inst.calc.spends;
+  const groupsRef = inst.calc.groups;
+
+  inst.loadExample();
+
+  // same array/object identities (so Alpine $watch keeps tracking)
+  assert.equal(inst.calc, calcRef);
+  assert.equal(inst.calc.persons, personsRef);
+  assert.equal(inst.calc.spends, spendsRef);
+  assert.equal(inst.calc.groups, groupsRef);
+
+  assert.equal(inst.calc.persons.length, 3);
+  assert.equal(inst.calc.spends.length, 3);
+  assert.equal(inst.calc.groups.length, 0);
+});
+
+test('personIssue: empty/whitespace name flagged, valid name passes', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  assert.ok(inst.personIssue({ name: '' }));
+  assert.ok(inst.personIssue({ name: '   ' }));
+  assert.ok(inst.personIssue({}));
+  assert.equal(inst.personIssue({ name: 'A' }), null);
+});
+
+test('spendIssue: each invalid state returns a reason, valid returns null', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons = [
+    { id: 'A', name: 'A', groupId: '' },
+    { id: 'B', name: 'B', groupId: '' },
+    { id: 'X', name: '', groupId: '' },
+  ];
+
+  // valid
+  assert.equal(inst.spendIssue({
+    value: '10', sponsorId: 'A', consumerIds: '__all__',
+  }), null);
+
+  // empty value
+  assert.match(inst.spendIssue({
+    value: '', sponsorId: 'A', consumerIds: '__all__',
+  }), /сумм/);
+
+  // non-positive
+  assert.match(inst.spendIssue({
+    value: '-1', sponsorId: 'A', consumerIds: '__all__',
+  }), /больше нуля/);
+  assert.match(inst.spendIssue({
+    value: '0', sponsorId: 'A', consumerIds: '__all__',
+  }), /больше нуля/);
+
+  // missing sponsor
+  assert.match(inst.spendIssue({
+    value: '10', sponsorId: '', consumerIds: '__all__',
+  }), /кто заплатил/);
+
+  // sponsor without name
+  assert.match(inst.spendIssue({
+    value: '10', sponsorId: 'X', consumerIds: '__all__',
+  }), /пустое имя/);
+
+  // empty consumers list
+  assert.match(inst.spendIssue({
+    value: '10', sponsorId: 'A', consumerIds: [],
+  }), /на кого делить/);
+
+  // consumers reference only unnamed/unknown
+  assert.match(inst.spendIssue({
+    value: '10', sponsorId: 'A', consumerIds: ['X', 'GHOST'],
+  }), /никто/i);
+});
+
+test('spendIssue: __all__ with no named persons reports issue', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons = [{ id: 'X', name: '', groupId: '' }];
+  assert.match(inst.spendIssue({
+    value: '10', sponsorId: 'X', consumerIds: '__all__',
+  }), /пустое имя|нет участников/);
+});
+
+test('summary reports skippedSpends and skippedPersons', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt, {
+    persons: [
+      { id: 'A', name: 'A', groupId: '' },
+      { id: 'B', name: 'B', groupId: '' },
+      { id: 'X', name: '', groupId: '' },  // skipped: no name
+    ],
+    groups: [],
+    spends: [
+      { id: 's1', value: '10', sponsorId: 'A', consumerIds: '__all__', note: '' },
+      { id: 's2', value: '', sponsorId: 'A', consumerIds: '__all__', note: '' },  // skipped: no value
+      { id: 's3', value: '5', sponsorId: '', consumerIds: '__all__', note: '' },  // skipped: no sponsor
+    ],
+  });
+  inst.recompute();
+  assert.equal(inst.result.summary.spendCount, 1);
+  assert.equal(inst.result.summary.skippedSpends, 2);
+  assert.equal(inst.result.summary.personCount, 2);
+  assert.equal(inst.result.summary.skippedPersons, 1);
+});
+
+test('result includes summary and spendsList', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt, {
+    persons: [
+      { id: 'A', name: 'A', groupId: '' },
+      { id: 'B', name: 'B', groupId: '' },
+    ],
+    groups: [],
+    spends: [
+      { id: 's1', value: '40', sponsorId: 'A', consumerIds: '__all__', note: 'ужин' },
+      { id: 's2', value: '20', sponsorId: 'B', consumerIds: ['A'], note: '' },
+    ],
+  });
+  inst.recompute();
+  assert.equal(inst.result.summary.spendCount, 2);
+  assert.equal(inst.result.summary.personCount, 2);
+  assert.equal(inst.result.spendsList.length, 2);
+  const ужин = inst.result.spendsList.find(s => s.note === 'ужин');
+  assert.ok(ужин);
+  assert.equal(ужин.sponsorName, 'A');
+  assert.equal(ужин.forAll, true);
+  const другая = inst.result.spendsList.find(s => s.id === 's2');
+  assert.equal(другая.forAll, false);
+  assert.deepEqual(другая.consumerNames, ['A']);
+});
+
+test('resetCalc snapshots and clears the calc (no confirm)', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons.push({ id: 'A', name: 'A', groupId: '' });
+  inst.calc.spends.push({
+    id: 's1', value: '10', sponsorId: 'A', consumerIds: ['A'], note: 'x',
+  });
+
+  inst.resetCalc();
+
+  assert.equal(inst.calc.persons.length, 0);
+  assert.equal(inst.calc.spends.length, 0);
+  assert.notEqual(inst.lastClearedSnapshot, null);
+  assert.equal(inst.lastClearedSnapshot.persons.length, 1);
+  assert.equal(inst.lastClearedSnapshot.spends.length, 1);
+  inst.dismissClearedToast();  // cancel pending timer to keep test process clean
+});
+
+test('resetCalc on empty calc takes no snapshot', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.resetCalc();
+  assert.equal(inst.lastClearedSnapshot, null);
+});
+
+test('undoClear restores persons/spends/groups in place', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons.push({ id: 'A', name: 'A', groupId: 'g1' });
+  inst.calc.groups.push({ id: 'g1', name: 'Family' });
+  inst.calc.spends.push({
+    id: 's1', value: '10', sponsorId: 'A', consumerIds: ['A'], note: 'ужин',
+  });
+  const personsRef = inst.calc.persons;
+  const spendsRef = inst.calc.spends;
+  const groupsRef = inst.calc.groups;
+
+  inst.resetCalc();
+  inst.undoClear();
+
+  assert.equal(inst.calc.persons.length, 1);
+  assert.equal(inst.calc.persons[0].name, 'A');
+  assert.equal(inst.calc.groups.length, 1);
+  assert.equal(inst.calc.groups[0].name, 'Family');
+  assert.equal(inst.calc.spends.length, 1);
+  assert.equal(inst.calc.spends[0].note, 'ужин');
+  assert.deepEqual(inst.calc.spends[0].consumerIds, ['A']);
+  assert.equal(inst.calc.persons, personsRef);
+  assert.equal(inst.calc.spends, spendsRef);
+  assert.equal(inst.calc.groups, groupsRef);
+  assert.equal(inst.lastClearedSnapshot, null);
+});
+
+test('undoClear after user mutation drops the user changes and restores snapshot', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons.push({ id: 'A', name: 'A', groupId: '' });
+
+  inst.resetCalc();
+  inst.calc.persons.push({ id: 'NEW', name: 'New', groupId: '' });
+  inst.undoClear();
+
+  assert.equal(inst.calc.persons.length, 1);
+  assert.equal(inst.calc.persons[0].id, 'A');
+  inst.dismissClearedToast();
+});
+
+test('undoClear is a no-op without a snapshot', () => {
+  const { splitDebt } = loadApp();
+  const inst = makeInstance(splitDebt);
+  inst.calc.persons.push({ id: 'A', name: 'A', groupId: '' });
+  inst.undoClear();
+  assert.equal(inst.calc.persons.length, 1);
 });
 
 test('removeSpend removes by index', () => {

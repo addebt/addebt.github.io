@@ -19,6 +19,7 @@ function encodeCalc(calc) {
       v: s.value,
       sp: s.sponsorId,
       c: s.consumerIds === '__all__' ? '*' : [...(s.consumerIds || [])],
+      t: s.note || '',
     })),
   };
   return LZString.compressToEncodedURIComponent(JSON.stringify(payload));
@@ -38,6 +39,7 @@ function decodeCalc(s) {
         value: s.v,
         sponsorId: s.sp,
         consumerIds: s.c === '*' ? '__all__' : (Array.isArray(s.c) ? s.c : []),
+        note: s.t || '',
       })),
     };
   } catch {
@@ -50,6 +52,8 @@ function splitDebt() {
     calc: emptyCalc(),
     shareCopied: false,
     result: null,
+    lastClearedSnapshot: null,
+    _clearedTimer: null,
 
     init() {
       const hash = location.hash || '';
@@ -83,12 +87,7 @@ function splitDebt() {
 
     onPersonGroupChange(person) {
       if (person.groupId === '__new__') {
-        const name = prompt('Название кошелька:');
-        if (!name) {
-          person.groupId = '';
-          return;
-        }
-        const g = { id: uid(), name: name.trim() };
+        const g = { id: uid(), name: '' };
         this.calc.groups.push(g);
         person.groupId = g.id;
       }
@@ -100,9 +99,47 @@ function splitDebt() {
       this.calc.groups = this.calc.groups.filter(g => used.has(g.id));
     },
 
+    personIssue(p) {
+      if (!p.name || !p.name.trim()) return 'добавь имя — иначе участник не попадёт в расчёт';
+      return null;
+    },
+
+    spendIssue(s) {
+      const namedPersons = this.calc.persons.filter(p => p.name && p.name.trim());
+      const personIds = new Set(namedPersons.map(p => p.id));
+
+      if (s.value === '' || s.value == null) return 'укажи сумму';
+      const v = parseFloat(s.value);
+      if (!Number.isFinite(v) || v <= 0) return 'сумма должна быть больше нуля';
+      if (!s.sponsorId) return 'выбери, кто заплатил';
+      if (!personIds.has(s.sponsorId)) return 'у плательщика пустое имя';
+      if (s.consumerIds === '__all__') {
+        if (!namedPersons.length) return 'нет участников с именами';
+        return null;
+      }
+      if (!Array.isArray(s.consumerIds) || !s.consumerIds.length) {
+        return 'выбери, на кого делить трату';
+      }
+      if (!s.consumerIds.some(id => personIds.has(id))) {
+        return 'никто из выбранных не участвует';
+      }
+      return null;
+    },
+
+    walletFor(person) {
+      if (!person.groupId) return null;
+      return this.calc.groups.find(g => g.id === person.groupId) || null;
+    },
+
+    setWalletName(person, name) {
+      const w = this.walletFor(person);
+      if (w) w.name = name;
+    },
+
     addSpend() {
       this.calc.spends.push({
         id: uid(),
+        note: '',
         value: '',
         sponsorId: '',
         consumerIds: '__all__',
@@ -126,9 +163,61 @@ function splitDebt() {
       else s.consumerIds.push(pid);
     },
 
+    clearCalcInPlace() {
+      this.calc.persons.splice(0);
+      this.calc.spends.splice(0);
+      this.calc.groups.splice(0);
+    },
+
     resetCalc() {
-      if (!confirm('Очистить текущий расчёт?')) return;
-      this.calc = emptyCalc();
+      if (!this.calc.persons.length && !this.calc.spends.length) return;
+      this.lastClearedSnapshot = {
+        persons: this.calc.persons.map(p => ({ ...p })),
+        groups: this.calc.groups.map(g => ({ ...g })),
+        spends: this.calc.spends.map(s => ({
+          ...s,
+          consumerIds: Array.isArray(s.consumerIds) ? [...s.consumerIds] : s.consumerIds,
+        })),
+      };
+      this.clearCalcInPlace();
+      if (this._clearedTimer) clearTimeout(this._clearedTimer);
+      this._clearedTimer = setTimeout(() => {
+        this.lastClearedSnapshot = null;
+        this._clearedTimer = null;
+      }, 6000);
+    },
+
+    undoClear() {
+      if (!this.lastClearedSnapshot) return;
+      if (this._clearedTimer) clearTimeout(this._clearedTimer);
+      this._clearedTimer = null;
+      this.clearCalcInPlace();
+      this.calc.persons.push(...this.lastClearedSnapshot.persons);
+      this.calc.groups.push(...this.lastClearedSnapshot.groups);
+      this.calc.spends.push(...this.lastClearedSnapshot.spends);
+      this.lastClearedSnapshot = null;
+    },
+
+    dismissClearedToast() {
+      if (this._clearedTimer) clearTimeout(this._clearedTimer);
+      this._clearedTimer = null;
+      this.lastClearedSnapshot = null;
+    },
+
+    loadExample() {
+      this.clearCalcInPlace();
+
+      const aId = uid(), bId = uid(), cId = uid();
+      this.calc.persons.push(
+        { id: aId, name: 'Аня', groupId: '' },
+        { id: bId, name: 'Боря', groupId: '' },
+        { id: cId, name: 'Вика', groupId: '' },
+      );
+      this.calc.spends.push(
+        { id: uid(), note: 'Ужин',   value: '3000', sponsorId: aId, consumerIds: '__all__' },
+        { id: uid(), note: 'Такси',  value: '500',  sponsorId: bId, consumerIds: [aId, bId] },
+        { id: uid(), note: 'Билеты', value: '1200', sponsorId: cId, consumerIds: '__all__' },
+      );
     },
 
     syncHash() {
@@ -156,13 +245,7 @@ function splitDebt() {
       const personById = Object.fromEntries(persons.map(p => [p.id, p]));
       const groupById = Object.fromEntries(this.calc.groups.map(g => [g.id, g]));
 
-      const spends = this.calc.spends.filter(s => {
-        const v = parseFloat(s.value);
-        if (!Number.isFinite(v) || v <= 0) return false;
-        if (!personById[s.sponsorId]) return false;
-        if (s.consumerIds === '__all__') return persons.length > 0;
-        return Array.isArray(s.consumerIds) && s.consumerIds.some(id => personById[id]);
-      });
+      const spends = this.calc.spends.filter(s => !this.spendIssue(s));
 
       if (!persons.length || !spends.length) {
         this.result = null;
@@ -244,7 +327,38 @@ function splitDebt() {
         }
       }
 
-      this.result = { balances: balanceList, transactions };
+      const totalValue = spends.reduce(
+        (acc, s) => acc.plus(new D(s.value)),
+        new D(0)
+      );
+
+      const spendsList = spends.map(s => {
+        const consumers = (s.consumerIds === '__all__' ? allIds : s.consumerIds)
+          .filter(id => personById[id]);
+        const v = new D(s.value).toDecimalPlaces(2);
+        return {
+          id: s.id,
+          note: s.note || '',
+          value: v,
+          display: this.formatMoney(v),
+          sponsorName: personById[s.sponsorId]?.name || '?',
+          forAll: s.consumerIds === '__all__',
+          consumerNames: consumers.map(id => personById[id].name),
+        };
+      });
+
+      const summary = {
+        totalDisplay: this.formatMoney(totalValue.toDecimalPlaces(2)),
+        spendCount: spends.length,
+        skippedSpends: this.calc.spends.length - spends.length,
+        personCount: persons.length,
+        skippedPersons: this.calc.persons.length - persons.length,
+        avgDisplay: this.formatMoney(
+          totalValue.dividedBy(persons.length).toDecimalPlaces(2)
+        ),
+      };
+
+      this.result = { balances: balanceList, transactions, spendsList, summary };
     },
 
     makeTx(from, to, value) {
