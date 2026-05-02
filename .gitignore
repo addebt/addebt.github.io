@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+
+# test / coverage output
+coverage/
+.nyc_output/
+
+# env
+.env
+.env.*
+!.env.example
+
+# editors / IDE
+.vscode/
+.idea/
+.zed/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

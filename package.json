@@ -1,0 +1,11 @@
+{
+  "name": "split-debt",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "decimal.js": "10.4.3",
+    "lz-string": "1.5.0"
+  }
+}
